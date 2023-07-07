@@ -14,8 +14,7 @@ import tensorflow as tf
 
 import tensorflow.keras.backend as K
 from tensorflow.keras.models import model_from_json, load_model
-# from tensorflow.compat.v2.keras.utils import multi_gpu_model
-# from tf.distribute import MirroredStrategy
+from tensorflow.compat.v2.keras.utils import multi_gpu_model
 
 # # Use on GPU
 import os
@@ -63,7 +62,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     warnings.warn("deprecated", DeprecationWarning)
 
-# np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
+np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
     
 def get_new_NibImgJ(new_img, temp_imgJ, dataType=np.float32):
     temp_imgJ.set_data_dtype(dataType)
@@ -158,7 +157,7 @@ def check_regions(img):
 def remove_small_objects(img, remove_max_size=5, structure = np.ones((3,3))):
     binary = img
     binary[binary>0] = 1
-    labels = np.array(scipy.ndimage.label(binary, structure=structure), dtype=object)[0]
+    labels = np.array(scipy.ndimage.label(binary, structure=structure))[0]
     labels_num = [len(labels[labels==each]) for each in np.unique(labels)]
     new_img = img
     for index in np.unique(labels):
@@ -211,7 +210,7 @@ def qfunc(x):
 def get_dwi_normalized(Dwi_ss_MNI_img,mask_raw_MNI_img):
     Dwi_d = Dwi_ss_MNI_img[mask_raw_MNI_img>0.5]
 
-    md = scipy.stats.mode(Dwi_d.astype('int16'))[0]
+    md = scipy.stats.mode(Dwi_d.astype('int16'))[0][0]
     if md > np.mean(Dwi_d):
         p0_mu = md
     else:
@@ -322,10 +321,16 @@ def gen_result_png(SubjDir,
     plt.rcParams["axes.grid"] = False
     
     SubjID = os.path.join(SubjDir,'').split('/')[-2]
-    DwiPath = os.path.join(SubjDir, SubjID + '_DWI.nii.gz')
-    B0Path = os.path.join(SubjDir, SubjID + '_b0.nii.gz')
-    ADCPath = os.path.join(SubjDir, SubjID + '_ADC.nii.gz')
+    DwiPath = os.path.join(SubjDir, SubjID + '_DWI.nii')
+    B0Path = os.path.join(SubjDir, SubjID + '_b0.nii')
+    ADCPath = os.path.join(SubjDir, SubjID + '_ADC.nii')
     LPPath = os.path.join(SubjDir, SubjID + '_' + lesion_name + '.nii.gz')
+    if not os.path.exists(DwiPath):
+        DwiPath = os.path.join(SubjDir, SubjID + '_DWI.nii.gz')
+    if not os.path.exists(B0Path):
+        B0Path = os.path.join(SubjDir, SubjID + '_b0.nii.gz')
+    if not os.path.exists(ADCPath):
+        ADCPath = os.path.join(SubjDir, SubjID + '_ADC.nii.gz')
     
     Dwi_imgJ, Dwi_img, _ = load_img_AffMat(DwiPath)
     B0_imgJ, B0_img, B0_AffMat = load_img_AffMat(B0Path)
@@ -375,7 +380,7 @@ def gen_result_png(SubjDir,
     plt.close()
     
 def get_VasLobeTemp(TemplateDir):
-    vas_pth = os.path.join(TemplateDir,'ArterialAtlas_padding.nii.gz')
+    vas_pth = os.path.join(TemplateDir,'ArterialAtlas_padding_new.nii')
     lobe_pth = os.path.join(TemplateDir,'lobe_atlas_padding.nii.gz') 
 
     vas_imgJ, vas_img, vas_AffMat = load_img_AffMat(vas_pth)
@@ -395,7 +400,7 @@ def get_VasLobeTemp(TemplateDir):
     vas_L1_name = [ _.split('\t')[0] for _ in vas_contents]
     
     lobe_L1 = [ _.split('\t')[1].replace('\n','') for _ in lobe_contents]
-    lobe_L1
+#     lobe_L1
     
     def get_L2_label_idx(L):
         if L == 'ACA':
@@ -408,20 +413,20 @@ def get_VasLobeTemp(TemplateDir):
             return 4
         else:
             return 0
-    vas_L2 = ['ACA', 'MCA', 'PCA', 'VB']
 
     vas_combine = np.zeros_like(vas_img)
-    for idx in range(len(vas_L2)):
+    for idx in range(len(vas_L1)):
         vas_combine[(vas_img==idx+1)] = get_L2_label_idx(vas_L2[idx])
         
+    vas_L2 = ['ACA', 'MCA', 'PCA', 'VB']
 #     print(np.max(vas_combine))
     
     return vas_img, vas_combine, lobe_img, vas_L1, vas_L1_name, vas_L2, lobe_L1
 
 def get_category_features(stroke_img, temp):
-    v=np.zeros(np.int64(temp.max()))
+    v=np.zeros(np.int(temp.max()))
     inters = (stroke_img>0.5) * temp
-    for i in range(np.int64(temp.max())):
+    for i in range(np.int(temp.max())):
         v[i] = np.sum(inters==(i+1))
     return v
 
@@ -551,7 +556,7 @@ def ADS_pipeline(SubjDir,
     mask_raw_img = affine_map.transform_inverse((mask_MNI_img>0.5)*1, interpolation='nearest')
     mask_raw_img = (mask_raw_img>0.5)*1.0
     if generate_brainmask:
-        mask_raw_ImgJ = get_new_NibImgJ(mask_raw_img, Dwi_imgJ, dataType=np.int64)
+        mask_raw_ImgJ = get_new_NibImgJ(mask_raw_img, Dwi_imgJ, dataType=np.int16)
         nib.save(mask_raw_ImgJ, os.path.join(SubjDir, SubjID + '_Mask.nii.gz'))
     
     print('------ Finished inferencing brain mask------')
@@ -658,7 +663,7 @@ def ADS_pipeline(SubjDir,
         Dwi_ss_MNI_norm_imgJ = MNIdePadding_imgJ(Dwi_ss_MNI_norm_imgJ)
         nib.save(Dwi_ss_MNI_norm_imgJ, os.path.join(SubjDir, SubjID + '_DWI_Norm_MNI.nii.gz'))
         
-        LP_MNI_imgJ = get_new_NibImgJ(stroke_pred_img, JHU_B0_ss_imgJ, dataType=np.int64)
+        LP_MNI_imgJ = get_new_NibImgJ(stroke_pred_img, JHU_B0_ss_imgJ, dataType=np.int16)
         LP_MNI_imgJ = MNIdePadding_imgJ(LP_MNI_imgJ)
         nib.save(LP_MNI_imgJ, os.path.join(SubjDir, SubjID + '_' + lesion_name + '_MNI.nii.gz'))
         
