@@ -19,6 +19,7 @@ OPT_SAVEMNI = "-save_MNI"
 OPT_GENMASK = "-generate_brainmask"
 OPT_GENREPORT = "-generate_report"
 OPT_GENRESULTPNG = "-generate_result_png"
+OPT_CREATERESULTSFOLDER = "-create_results_folder"  # New option
 
 def get_arg_parser():
     parser = argparse.ArgumentParser(prog='ADSRun', formatter_class=argparse.RawTextHelpFormatter,
@@ -48,6 +49,9 @@ def get_arg_parser():
     parser.add_argument(OPT_GENRESULTPNG, dest='generate_result_png', type=bool, default=True,
                         help='For generating result in png, please set this option as True, otherwise set it as False. (default: True)')
     
+    parser.add_argument(OPT_CREATERESULTSFOLDER, dest='create_results_folder', type=bool, default=True,
+                        help='For creating a timestamped results folder to organize outputs, please set this option as True, otherwise set it as False to save in the input folder. (default: True)')
+    
     args = parser.parse_args()
     return args
 
@@ -58,24 +62,21 @@ def main(args):
     save_MNI = args.save_MNI
     generate_brainmask = args.generate_brainmask
     generate_report = args.generate_report
-    generate_result_png = args.generate_result_png,
+    generate_result_png = args.generate_result_png
+    create_results_folder_flag = args.create_results_folder
     
     ADS(SubjDir=SubjDir,
          model_name=model_name,
-#          level_iters = [3],
-#          sigmas = [3.0],
-#          factors = [2],
-#          lesion_name='Lesion_Predict'
          bvalue = bvalue,
          save_MNI=save_MNI,
          generate_brainmask=generate_brainmask,
          generate_report=generate_report,
-         generate_result_png=generate_result_png
+         generate_result_png=generate_result_png,
+         create_results_folder_flag=create_results_folder_flag  # New parameter
         )
 
 if __name__ == "__main__":       
     args = get_arg_parser()
-#     print(args)
     if len(sys.argv) == 1:
         print("For help on the usage of ADSRun, please use the option -h."); exit(1)
     if not args.input:

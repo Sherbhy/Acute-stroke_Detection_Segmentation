@@ -313,7 +313,21 @@ def get_DirPaths():
     TrainedNetsDir = os.path.join(ProjectDir,'data','Trained_Nets','')
     return CodesDir, ProjectDir, TemplateDir, TrainedNetsDir
 
-def gen_result_png(SubjDir, 
+def create_results_folder(SubjDir, SubjID):
+    """Create a results folder with timestamp"""
+    from datetime import datetime
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_folder_name = f"{SubjID}_ADS_Results_{timestamp}"
+    results_path = os.path.join(SubjDir, results_folder_name)
+    
+    # Create the directory
+    os.makedirs(results_path, exist_ok=True)
+    
+    print(f"------ Created results folder: {results_folder_name} ------")
+    return results_path
+
+def gen_result_png(ResultsDir, 
                         lesion_name='Lesion_Predict',
                         wspace=-0.1,
                         hspace=-0.5
@@ -321,11 +335,34 @@ def gen_result_png(SubjDir,
 
     plt.rcParams["axes.grid"] = False
     
-    SubjID = os.path.join(SubjDir,'').split('/')[-2]
+    # Extract SubjID from results folder name or use original logic
+    folder_name = os.path.basename(ResultsDir.rstrip('/'))
+    if '_ADS_Results_' in folder_name:
+        SubjID = folder_name.split('_ADS_Results_')[0]
+        SubjDir = os.path.dirname(ResultsDir)  # Parent directory
+    else:
+        # Original behavior - ResultsDir is same as SubjDir
+        SubjID = os.path.basename(ResultsDir.rstrip('/'))
+        SubjDir = ResultsDir
+    
+    # Look for input files in original subject directory
     DwiPath = os.path.join(SubjDir, SubjID + '_DWI.nii.gz')
+    if not os.path.exists(DwiPath):
+        DwiPath = os.path.join(SubjDir, SubjID + '_DWI.nii')
+        
     B0Path = os.path.join(SubjDir, SubjID + '_b0.nii.gz')
-    ADCPath = os.path.join(SubjDir, SubjID + '_ADC.nii.gz')
-    LPPath = os.path.join(SubjDir, SubjID + '_' + lesion_name + '.nii.gz')
+    if not os.path.exists(B0Path):
+        B0Path = os.path.join(SubjDir, SubjID + '_b0.nii')
+        
+    # Look for ADC in results directory first, then original directory
+    ADCPath = os.path.join(ResultsDir, SubjID + '_ADC.nii.gz')
+    if not os.path.exists(ADCPath):
+        ADCPath = os.path.join(SubjDir, SubjID + '_ADC.nii.gz')
+        if not os.path.exists(ADCPath):
+            ADCPath = os.path.join(SubjDir, SubjID + '_ADC.nii')
+    
+    # Lesion prediction is always in results directory
+    LPPath = os.path.join(ResultsDir, SubjID + '_' + lesion_name + '.nii.gz')
     
     Dwi_imgJ, Dwi_img, _ = load_img_AffMat(DwiPath)
     B0_imgJ, B0_img, B0_AffMat = load_img_AffMat(B0Path)
@@ -370,7 +407,7 @@ def gen_result_png(SubjDir,
 
     plt.tight_layout()
     gs0.update(wspace=wspace, hspace=hspace)
-    plt.savefig(os.path.join(SubjDir, SubjID + '_' + lesion_name + '_result.png'), bbox_inches = "tight")
+    plt.savefig(os.path.join(ResultsDir, SubjID + '_' + lesion_name + '_result.png'), bbox_inches = "tight")
 #     plt.show()
     plt.close()
     
@@ -390,12 +427,12 @@ def get_VasLobeTemp(TemplateDir):
     with open(lobe_table_pth) as f:
         lobe_contents = f.readlines()
     
-    vas_L1 = [ _.split('\t')[2] for _ in vas_contents]
-    vas_L2 = [ _.split('\t')[5] for _ in vas_contents]
-    vas_L1_name = [ _.split('\t')[0] for _ in vas_contents]
+    # FIX: Use the trimmed vas_contents, not the original
+    vas_L1 = [ _.split('\t')[2] for _ in vas_contents]  # Use trimmed vas_contents
+    vas_L2_from_file = [ _.split('\t')[5] for _ in vas_contents]  # Use trimmed vas_contents  
+    vas_L1_name = [ _.split('\t')[0] for _ in vas_contents]  # Use trimmed vas_contents
     
     lobe_L1 = [ _.split('\t')[1].replace('\n','') for _ in lobe_contents]
-    lobe_L1
     
     def get_L2_label_idx(L):
         if L == 'ACA':
@@ -408,6 +445,8 @@ def get_VasLobeTemp(TemplateDir):
             return 4
         else:
             return 0
+    
+    # Create vas_L2 as the unique territory list
     vas_L2 = ['ACA', 'MCA', 'PCA', 'VB']
 
     vas_combine = np.zeros_like(vas_img)
@@ -426,37 +465,53 @@ def get_category_features(stroke_img, temp):
     return v
 
 
-def gen_lesion_report(SubjDir, SubjID, lesion_img, ICV_vol, Lesion_vol, TemplateDir):
+def gen_lesion_report(ResultsDir, SubjID, lesion_img, ICV_vol, Lesion_vol, TemplateDir):
     
-    vas_img, vas_combine, lobe_img, vas_L1, vas_L1_name, vas_L2, lobe_L1 = get_VasLobeTemp(TemplateDir)
-    
-#     Lesion_vol = np.sum(lesion_img)
-    vas_v_L1 = get_category_features(lesion_img, vas_img)
-    vas_v_L2 = get_category_features(lesion_img, vas_combine)
-    lobe_v_L1 = get_category_features(lesion_img, lobe_img)
-    
-#     print(np.max(vas_combine))
-    ReportTxt_pth = os.path.join(SubjDir, SubjID + '_volume_brain_regions.txt')
-    with open(ReportTxt_pth, 'w') as f:
+    try:
+        vas_img, vas_combine, lobe_img, vas_L1, vas_L1_name, vas_L2, lobe_L1 = get_VasLobeTemp(TemplateDir)
         
-        f.write('intracranial volume \t%d' % (ICV_vol) + '\n\n')
-        f.write('stroke volume \t%d' % (Lesion_vol) + '\n\n')
+        vas_v_L1 = get_category_features(lesion_img, vas_img)
+        vas_v_L2 = get_category_features(lesion_img, vas_combine)
+        lobe_v_L1 = get_category_features(lesion_img, lobe_img)
         
-        f.write('vascular territory\tnumber of voxel\n')
-        
-        for idx in range(len(vas_L1)):
-            f.write(vas_L1[idx]+'\t%d\t'% vas_v_L1[idx] + vas_L1_name[idx] + '\n')
+        ReportTxt_pth = os.path.join(ResultsDir, SubjID + '_volume_brain_regions.txt')
+        with open(ReportTxt_pth, 'w') as f:
             
-        f.write('\n')
-        f.write('vascular territory 2\tnumber of voxel\n')
-        for idx in range(len(vas_L2)):
-            f.write(vas_L2[idx]+'\t%d\t'% vas_v_L2[idx] + '\n')
-        
-        f.write('\n')
-        f.write('area\tnumber of voxel\n')
-        for idx in range(len(lobe_L1)):
-            f.write(lobe_L1[idx]+'\t%d\t'% lobe_v_L1[idx] + '\n')  
-        
+            f.write('intracranial volume \t%d' % (ICV_vol) + '\n\n')
+            f.write('stroke volume \t%d' % (Lesion_vol) + '\n\n')
+            
+            f.write('vascular territory\tnumber of voxel\n')
+                    
+            count = min(len(vas_L1), len(vas_v_L1), len(vas_L1_name))
+            for idx in range(count):
+                f.write(vas_L1[idx] + '\t%d\t' % vas_v_L1[idx] + vas_L1_name[idx] + '\n')
+                
+            f.write('\n')
+            f.write('vascular territory 2\tnumber of voxel\n')
+            
+            # Safe iteration with bounds checking
+            for idx in range(len(vas_L2)):
+                if idx < len(vas_v_L2):
+                    f.write(vas_L2[idx]+'\t%d\t'% vas_v_L2[idx] + '\n')
+                else:
+                    f.write(vas_L2[idx]+'\t0\t\n')
+            
+            f.write('\n')
+            f.write('area\tnumber of voxel\n')
+            for idx in range(len(lobe_L1)):
+                if idx < len(lobe_v_L1):
+                    f.write(lobe_L1[idx]+'\t%d\t'% lobe_v_L1[idx] + '\n')
+                else:
+                    f.write(lobe_L1[idx]+'\t0\t\n')
+                    
+    except Exception as e:
+        print(f"Warning: Could not generate detailed lesion report. Error: {e}")
+        # Generate basic report
+        ReportTxt_pth = os.path.join(ResultsDir, SubjID + '_volume_brain_regions.txt')
+        with open(ReportTxt_pth, 'w') as f:
+            f.write('intracranial volume \t%d' % (ICV_vol) + '\n\n')
+            f.write('stroke volume \t%d' % (Lesion_vol) + '\n\n')
+            f.write('Note: Detailed regional analysis unavailable due to template processing error.\n')
             
 def ADS_pipeline(SubjDir, 
                  SubjID,
@@ -472,8 +527,14 @@ def ADS_pipeline(SubjDir,
                  save_MNI=True, 
                  generate_brainmask=False,
                  generate_report=True,
-                 generate_result_png=True
+                 generate_result_png=True,
+                 ResultsDir=None  # New parameter
                 ):
+    
+    # Use ResultsDir if provided, otherwise use SubjDir
+    if ResultsDir is None:
+        ResultsDir = SubjDir
+        
     start_time = time.time()
 
     # loading dwi, b0
@@ -512,6 +573,8 @@ def ADS_pipeline(SubjDir,
         
     if not os.path.exists(ADCPath):
         print('------ Calculating ADC with b-value=%d ------' % bvalue)
+        # Save ADC to results folder instead of input folder
+        ADCPath = os.path.join(ResultsDir, SubjID + '_ADC.nii.gz')
         Cal_ADC(Dwi_imgJ, B0_imgJ, ADCPath, bvalue)
     
     # loading ADC
@@ -552,7 +615,7 @@ def ADS_pipeline(SubjDir,
     mask_raw_img = (mask_raw_img>0.5)*1.0
     if generate_brainmask:
         mask_raw_ImgJ = get_new_NibImgJ(mask_raw_img, Dwi_imgJ, dataType=np.int64)
-        nib.save(mask_raw_ImgJ, os.path.join(SubjDir, SubjID + '_Mask.nii.gz'))
+        nib.save(mask_raw_ImgJ, os.path.join(ResultsDir, SubjID + '_Mask.nii.gz'))
     
     print('------ Finished inferencing brain mask------')
     print('It takes %.2f seconds'% (time.time() - start_time))
@@ -635,48 +698,48 @@ def ADS_pipeline(SubjDir,
     print('It takes %.2f seconds'% (time.time() - start_time))
     start_time = time.time()
  
-    # Save lesion predict
+    # Save lesion predict to ResultsDir
     LP_ImgJ = get_new_NibImgJ(stroke_pred_raw_img, Dwi_imgJ, dataType=np.float32)
-    nib.save(LP_ImgJ, os.path.join(SubjDir, SubjID + '_' + lesion_name + '.nii.gz'))
+    nib.save(LP_ImgJ, os.path.join(ResultsDir, SubjID + '_' + lesion_name + '.nii.gz'))
 
-    # save images in MNI
+    # save images in MNI to ResultsDir
     if save_MNI:
         print('------ Saving images in MNI. ------')
         Dwi_ss_MNI_imgJ = get_new_NibImgJ(Dwi_ss_MNI_img, JHU_B0_ss_imgJ, dataType=np.float32)
         Dwi_ss_MNI_imgJ = MNIdePadding_imgJ(Dwi_ss_MNI_imgJ)
-        nib.save(Dwi_ss_MNI_imgJ, os.path.join(SubjDir, SubjID + '_DWI_MNI.nii.gz'))
+        nib.save(Dwi_ss_MNI_imgJ, os.path.join(ResultsDir, SubjID + '_DWI_MNI.nii.gz'))
         
         B0_ss_MNI_imgJ = get_new_NibImgJ(B0_ss_MNI_img, JHU_B0_ss_imgJ, dataType=np.float32)
         B0_ss_MNI_imgJ = MNIdePadding_imgJ(B0_ss_MNI_imgJ)
-        nib.save(B0_ss_MNI_imgJ, os.path.join(SubjDir, SubjID + '_b0_MNI.nii.gz'))
+        nib.save(B0_ss_MNI_imgJ, os.path.join(ResultsDir, SubjID + '_b0_MNI.nii.gz'))
         
         ADC_ss_MNI_imgJ = get_new_NibImgJ(ADC_ss_MNI_img, JHU_B0_ss_imgJ, dataType=np.float32)
         ADC_ss_MNI_imgJ = MNIdePadding_imgJ(ADC_ss_MNI_imgJ)
-        nib.save(ADC_ss_MNI_imgJ, os.path.join(SubjDir, SubjID + '_ADC_MNI.nii.gz'))
+        nib.save(ADC_ss_MNI_imgJ, os.path.join(ResultsDir, SubjID + '_ADC_MNI.nii.gz'))
         
         Dwi_ss_MNI_norm_imgJ = get_new_NibImgJ(Dwi_ss_MNI_norm_img, JHU_B0_ss_imgJ, dataType=np.float32)
         Dwi_ss_MNI_norm_imgJ = MNIdePadding_imgJ(Dwi_ss_MNI_norm_imgJ)
-        nib.save(Dwi_ss_MNI_norm_imgJ, os.path.join(SubjDir, SubjID + '_DWI_Norm_MNI.nii.gz'))
+        nib.save(Dwi_ss_MNI_norm_imgJ, os.path.join(ResultsDir, SubjID + '_DWI_Norm_MNI.nii.gz'))
         
         LP_MNI_imgJ = get_new_NibImgJ(stroke_pred_img, JHU_B0_ss_imgJ, dataType=np.int64)
         LP_MNI_imgJ = MNIdePadding_imgJ(LP_MNI_imgJ)
-        nib.save(LP_MNI_imgJ, os.path.join(SubjDir, SubjID + '_' + lesion_name + '_MNI.nii.gz'))
+        nib.save(LP_MNI_imgJ, os.path.join(ResultsDir, SubjID + '_' + lesion_name + '_MNI.nii.gz'))
         
         if generate_brainmask:
             mask_raw_MNI_img = (mask_raw_MNI_img>0.5)*1.0
             mask_raw_MNI_ImgJ = get_new_NibImgJ(mask_raw_MNI_img, JHU_B0_ss_imgJ, dataType=np.float32)
             mask_raw_MNI_ImgJ = MNIdePadding_imgJ(mask_raw_MNI_ImgJ)
-            nib.save(mask_raw_MNI_ImgJ, os.path.join(SubjDir, SubjID + '_Mask_MNI.nii.gz'))
+            nib.save(mask_raw_MNI_ImgJ, os.path.join(ResultsDir, SubjID + '_Mask_MNI.nii.gz'))
 
     if generate_report:
         print('------ Generating lesion report ------')
         ICV_vol = VolSpacing * np.sum((mask_raw_img>0.5)*1.0)
         Lesion_vol = VolSpacing * np.sum((stroke_pred_raw_img>0.5)*1.0)
-        gen_lesion_report(SubjDir, SubjID, stroke_pred_img, ICV_vol, Lesion_vol, TemplateDir)
+        gen_lesion_report(ResultsDir, SubjID, stroke_pred_img, ICV_vol, Lesion_vol, TemplateDir)
         
     if generate_result_png:
         print('------ Generating result png file ------')
-        gen_result_png(SubjDir, lesion_name=lesion_name)
+        gen_result_png(ResultsDir, lesion_name=lesion_name)
         
     print('------ Finish generating all results ------')
     print('It takes %.2f seconds'% (time.time() - start_time))
@@ -691,7 +754,8 @@ def ADS(SubjDir,
          save_MNI=True,
          generate_brainmask=False,
          generate_report=True,
-         generate_result_png=True
+         generate_result_png=True,
+         create_results_folder_flag=True  # New parameter
         ):
     
     CodesDir, ProjectDir, TemplateDir, TrainedNetsDir = get_DirPaths()
@@ -704,6 +768,12 @@ def ADS(SubjDir,
         N_channel = 2
     elif 'CH3' in model_name:
         N_channel = 3
+    
+    # Create results folder if requested
+    if create_results_folder_flag:
+        ResultsDir = create_results_folder(SubjDir, SubjID)
+    else:
+        ResultsDir = SubjDir
         
     ADS_pipeline(SubjDir,
              SubjID,
@@ -719,6 +789,8 @@ def ADS(SubjDir,
              save_MNI=save_MNI,
              generate_brainmask=generate_brainmask,
              generate_report=generate_report,
-             generate_result_png=generate_result_png
+             generate_result_png=generate_result_png,
+             ResultsDir = ResultsDir  # Pass results directory
             )
     print('------ Process Done !!! ------')
+    print(f'------ Results saved in: {ResultsDir} ------')
